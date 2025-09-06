@@ -1,14 +1,15 @@
-
 # Koala
-
 aka a worse panda(s)
 
 ## Description
-
 minimal, in-memory data processing libraries for csv
 
-provides methods for adding and removing columns, filtering, groupby and join, 
-save and load to CSV.
+provides methods for:
+- adding and removing columns
+- filtering
+- groupby and aggregate
+- join
+- save and load CSV files
 
 ## Example 
 
@@ -31,6 +32,7 @@ from koala import Koala, AggregationFunc
     # [5.4, 3.9, 1.7, 0.4, 'setosa']
 
     .where(lambda x: x["species"] != "setosa")
+    .column_add("NEW_COL", lambda x: x["sepal_width"] * 2)
     .group(
         by="species", 
         aggs=[
@@ -40,7 +42,7 @@ from koala import Koala, AggregationFunc
     )
     .column_drop("MAX_SEP_WIDTH_BY_SPECIES")
     .dropna()
-    .fillna(0, subset=["species"])
+    .fillna("a null species", subset=["species"])
     .join_left(Koala.read_csv(f), on=["species"])
     .join_inner(Koala.read_csv(f), on=["species"])
     .rename({
