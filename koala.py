@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import collections
+import copy
 import csv
 import dataclasses
 import enum
@@ -56,13 +57,13 @@ class AggregationFunc(enum.Enum):
         msg = "bad aggregation function provided"
         if not isinstance(s, AggregationFunc):
             raise ValueError(msg)
-        if s == AggregationFunc.SUM: return sum
-        if s == AggregationFunc.MIN: return min
-        if s == AggregationFunc.MAX: return max
-        if s == AggregationFunc.MEAN: return statistics.mean
-        if s == AggregationFunc.STD: return statistics.stdev
-        if s == AggregationFunc.MEDIAN: return statistics.median
-        if s == AggregationFunc.COUNT: return len
+        if s == AggregationFunc.SUM    : return sum
+        if s == AggregationFunc.MIN    : return min
+        if s == AggregationFunc.MAX    : return max
+        if s == AggregationFunc.MEAN   : return statistics.mean
+        if s == AggregationFunc.STD    : return statistics.stdev
+        if s == AggregationFunc.MEDIAN : return statistics.median
+        if s == AggregationFunc.COUNT  : return len
         raise ValueError(msg)
 
 
@@ -70,6 +71,14 @@ class AggregationFunc(enum.Enum):
 class Koala:
     _cols: list[str]
     _rows: list[list]
+
+    @property
+    def columns(self) -> list[str]:
+        return self._cols
+
+    def clone(self) -> ty.Self:
+        """deepcopy"""
+        return copy.deepcopy(self)
 
     def show(self, n:int=6):
         print(self._cols)
@@ -129,7 +138,7 @@ class Koala:
             key = self._get_group_key(by, row)
             for agg in aggs:
                 result_name, aggregated_col, _ = agg
-                if result_name not in groups:
+                if groups.get(result_name) is None:
                     groups[result_name] = collections.defaultdict(list)
                 groups[result_name][key].append(row[aggregated_col])
         return groups
@@ -246,21 +255,6 @@ class Koala:
             writer.writerows(self._rows_as_dicts())
         return self
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#
 # def check():
 #     import pandas as pd
 #
@@ -285,6 +279,4 @@ class Koala:
 #
 # if __name__ == "__main__":
 #     check()
-#
-#
-#
+

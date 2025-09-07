@@ -8,7 +8,7 @@ provides methods for:
 - adding and removing columns
 - filtering
 - groupby and aggregate
-- join
+- join (not yet)
 - save and load CSV files
 
 ## Example 
@@ -51,6 +51,7 @@ from koala import Koala, AggregationFunc
     .sort(by=["a_better_name"])
     .show()
     .to_csv(out_file)
+    .show()
 )
 
 ```
