@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from ast import Str
 import collections
 import copy
 import csv
@@ -57,9 +56,10 @@ class AggregationFunc(enum.Enum):
     STD = enum.auto()
     MEDIAN = enum.auto()
     COUNT = enum.auto()
+    FIRST = enum.auto()
 
     @staticmethod
-    def _get_agg_func(s) -> ty.Callable:
+    def _get_agg_func(s: AggregationFunc) -> ty.Callable:
         msg = "bad aggregation function provided"
         if not isinstance(s, AggregationFunc):
             raise ValueError(msg)
@@ -70,6 +70,7 @@ class AggregationFunc(enum.Enum):
         if s == AggregationFunc.STD    : return statistics.stdev
         if s == AggregationFunc.MEDIAN : return statistics.median
         if s == AggregationFunc.COUNT  : return len
+        if s == AggregationFunc.FIRST  : return lambda x: x[0]
         raise ValueError(msg)
 
 
@@ -149,7 +150,8 @@ class Koala:
                 groups[result_name][key].append(row[aggregated_col])
         return groups
 
-    def _agg(self, by: StrS, aggs: list[tuple[str, str, AggregationFunc]], groups: dict) -> tuple[list, list]:
+    @staticmethod
+    def _agg(by: StrS, aggs: list[tuple[str, str, AggregationFunc]], groups: dict) -> tuple[list, list]:
         cols = []
         rows = collections.defaultdict(list)
         for i, agg in enumerate(aggs):
@@ -188,10 +190,8 @@ class Koala:
         return self
 
     def sort(self, by: StrS, reverse: bool = False) -> Koala:
-        
         def _sort_fn(x) -> list:
             return [x[self._cols.index(c)] for c in by]
-
         self._rows.sort(key=_sort_fn, reverse=reverse)
         return self
 
@@ -203,7 +203,6 @@ class Koala:
         return col in self._cols
 
     def dropna(self, subset: ty.Optional[list[str]] = None) -> Koala:
-
         if subset is None:
             def keep(r: list) -> bool:
                 return _has_no_null_values(self._row_as_dict(r))
@@ -211,7 +210,6 @@ class Koala:
             idxs = [self._cols.index(c) for c in subset]
             def keep(r: list) -> bool:
                 return all(r[i] is not None for i in idxs)
-
         self._rows = list(filter(keep, self._rows))
         return self
 
@@ -238,42 +236,121 @@ class Koala:
         _rows = [[r[k] for k in _cols] for r in ds]
         return cls(_cols, _rows)
 
-    def _join(self, right: Koala, join_key: StrS, kind: _JoinKind) -> Koala:
+    def join_left(self, right: Koala, join_key: StrS):
+        return self._join(self, right, join_key, _JoinKind.LEFT, dict())
 
+    def join_inner(self, right: Koala, join_key: StrS):
+        return self._join(self, right, join_key, _JoinKind.INNER, None)
+
+    @staticmethod
+    def _join(
+        left     : Koala,
+        right    : Koala,
+        join_key : StrS,
+        kind     : _JoinKind,
+        default  : ty.Any
+    ) -> Koala:
         join_key = _listify(join_key)
-
         def _join_key(d: dict) -> int:
-            return hash(tuple(d[o] for o in join_key))
+            return hash(tuple(d[k] for k in join_key))
 
-        cols = set(self._cols).union(right._cols)
+        left = left.clone().rename({c: f"{c}_left" for c in left._cols if c not in join_key})
+        right = right.clone().rename({c: f"{c}_right" for c in right._cols if c not in join_key})
+        cols = set(left._cols).union(right._cols)
 
         right_dict = {_join_key(r): r for r in right._rows_as_dicts()}
         result = []
-
-        default = dict()
-        if kind == _JoinKind.LEFT:
-            default = dict()
-        elif kind == _JoinKind.INNER:
-            default = None
-        else:
-            raise Exception("bad join type")
-
-        for merged_row in self._rows_as_dicts():
+        for merged_row in left._rows_as_dicts():
             right_row = right_dict.get(_join_key(merged_row), default)
-
-            if kind == _JoinKind.LEFT:
-                assert right_row is not None
-            elif kind == _JoinKind.INNER:
-                if right_row is None:
-                    continue
-
+            if kind == _JoinKind.INNER and right_row is None:
+                continue
+            assert right_row is not None
             merged_row.update(right_row)
             result.append({c: merged_row.get(c) for c in cols})
         return Koala.from_dict_list(result)
 
-    def left_join(self, right: Koala, join_key: StrS):
-        return self._join(right, join_key, _JoinKind.LEFT)
 
-    def inner_join(self, right: Koala, join_key: StrS):
-        return self._join(right, join_key, _JoinKind.INNER)
+
+
+# def left_join(left_table, right_table, join_key):
+#     """
+#     Perform a left join between two lists of dictionaries.
+#
+#     Args: - left_table: List of dictionaries from the left table
+#     - right_table: List of dictionaries from the right table
+#     - join_key: The key to use for matching records
+#
+#     Returns:
+#     - A list of merged dictionaries
+#     """
+#     # Create a dictionary from the right table for faster lookups
+#     right_dict = {record[join_key]: record for record in right_table}
+#
+#     # Perform the left join
+#     result = []
+#     for left_record in left_table:
+#         # Find matching record from right table
+#         right_record = right_dict.get(left_record[join_key], {})
+#
+#         # Merge the records
+#         merged_record = left_record.copy()
+#         merged_record.update(right_record)
+#
+#         result.append(merged_record)
+#
+#     return result
+#
+# # Example usage
+# left_table = [
+#     {'id': 1, 'name': 'Alice'},
+#     {'id': 2, 'name': 'Bob'},
+#     {'id': 3, 'name': 'Charlie'}
+# ]
+#
+# right_table = [
+#     {'id': 1, 'age': 30},
+#     {'id': 2, 'age': 25}
+# ]
+#
+# # Perform left join
+# result = left_join(left_table, right_table, 'id')
+# print(result)
+
+
+# def inner_join(left_table, right_table, join_key):
+#     """
+#     Perform an inner join between two lists of dictionaries.
+#
+#     Args:
+#     - left_table: List of dictionaries from the left table
+#     - right_table: List of dictionaries from the right table
+#     - join_key: The key to use for matching records
+#
+#     Returns:
+#     - A list of merged dictionaries with only matching records
+#     """
+#     # Create a dictionary from the right table for faster lookups
+#     right_dict = {record[join_key]: record for record in right_table}
+#
+#     # Perform the inner join
+#     result = []
+#     for left_record in left_table:
+#         # Find matching record from right table
+#         right_record = right_dict.get(left_record[join_key])
+#
+#         # Only add if a match is found
+#         if right_record is not None:
+#             # Merge the records
+#             merged_record = left_record.copy()
+#             merged_record.update(right_record)
+#
+#             result.append(merged_record)
+#
+#     return result
+#
+# # Example usage
+
+
+
+
 
