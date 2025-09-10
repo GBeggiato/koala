@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ast import Str
 import collections
 import copy
 import csv
@@ -14,6 +15,11 @@ import typing as ty
 type Row = dict[str, ty.Any]
 type Func[T] = ty.Callable[[Row], T]
 type StrS = str | list[str]
+
+
+class _JoinKind(enum.Enum):
+    INNER = enum.auto()
+    LEFT = enum.auto()
 
 
 def _listify(s: StrS) -> list[str]:
@@ -225,4 +231,49 @@ class Koala:
             writer.writeheader()
             writer.writerows(self._rows_as_dicts())
         return self
+
+    @classmethod
+    def from_dict_list(cls, ds: list[Row]) -> Koala:
+        _cols = list(next(iter(ds)).keys())
+        _rows = [[r[k] for k in _cols] for r in ds]
+        return cls(_cols, _rows)
+
+    def _join(self, right: Koala, join_key: StrS, kind: _JoinKind) -> Koala:
+
+        join_key = _listify(join_key)
+
+        def _join_key(d: dict) -> int:
+            return hash(tuple(d[o] for o in join_key))
+
+        cols = set(self._cols).union(right._cols)
+
+        right_dict = {_join_key(r): r for r in right._rows_as_dicts()}
+        result = []
+
+        default = dict()
+        if kind == _JoinKind.LEFT:
+            default = dict()
+        elif kind == _JoinKind.INNER:
+            default = None
+        else:
+            raise Exception("bad join type")
+
+        for merged_row in self._rows_as_dicts():
+            right_row = right_dict.get(_join_key(merged_row), default)
+
+            if kind == _JoinKind.LEFT:
+                assert right_row is not None
+            elif kind == _JoinKind.INNER:
+                if right_row is None:
+                    continue
+
+            merged_row.update(right_row)
+            result.append({c: merged_row.get(c) for c in cols})
+        return Koala.from_dict_list(result)
+
+    def left_join(self, right: Koala, join_key: StrS):
+        return self._join(right, join_key, _JoinKind.LEFT)
+
+    def inner_join(self, right: Koala, join_key: StrS):
+        return self._join(right, join_key, _JoinKind.INNER)
 
