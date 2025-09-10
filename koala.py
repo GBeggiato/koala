@@ -16,16 +16,16 @@ type Func[T] = ty.Callable[[Row], T]
 type StrS = str | list[str]
 
 
-def _listify(s: str | list[str]) -> list[str]:
+def _listify(s: StrS) -> list[str]:
     if isinstance(s, str):
         return [s]
     return s
 
 
-def _flatten(xs: list | tuple):  
+def _flatten(xs: list):  
     res = []  
     for x in xs:  
-        if isinstance(x, (list, tuple)):  
+        if isinstance(x, list):  
             res.extend(_flatten(x))
         else:  
             res.append(x)
@@ -76,7 +76,7 @@ class Koala:
     def columns(self) -> list[str]:
         return self._cols
 
-    def clone(self) -> ty.Self:
+    def clone(self) -> Koala:
         """deepcopy"""
         return copy.deepcopy(self)
 
@@ -91,7 +91,7 @@ class Koala:
         return self
 
     @classmethod
-    def read_csv(cls, f: Path) -> ty.Self:
+    def read_csv(cls, f: Path) -> Koala:
         with f.open() as fp:
             lines = iter(csv.reader(fp))
             return cls(
@@ -105,18 +105,18 @@ class Koala:
     def _rows_as_dicts(self):
         yield from map(self._row_as_dict, self._rows)
 
-    def where(self, f: Func[bool]) -> ty.Self:
+    def where(self, f: Func[bool]) -> Koala:
         self._rows = [r for r in self._rows if f(self._row_as_dict(r))]
         return self
 
-    def column_drop(self, col: str) -> ty.Self:
+    def column_drop(self, col: str) -> Koala:
         position = self._cols.index(col)
         del self._cols[position]
         for row in self._rows:
             del row[position]
         return self
 
-    def column_add(self, name: str, f: Func[ty.Any]) -> ty.Self:
+    def column_add(self, name: str, f: Func[ty.Any]) -> Koala:
         drop_old = name in self._cols
         self._cols.append(name)
         for row in self._rows:
@@ -162,14 +162,26 @@ class Koala:
             new_rows.append(row)
         return cols, new_rows
 
-    def group(self, by: StrS, aggs: list[tuple[str, str, AggregationFunc]]) -> ty.Self:
+    def group(self, by: StrS, aggs: list[tuple[str, str, AggregationFunc]]) -> Koala:
+        """
+        ```python3
+        .group(
+            by=["key"], # these go in a list
+            aggs=[( # and you need a list of these
+                    "tot_value_by_aggr", # the name of the new column
+                    "column",            # the column we are aggregating
+                    AggregationFunc.SUM  # the function we are using to aggregate
+            )]
+        )
+        ```
+        """
         groups = self._groupby(by, aggs)
         cols, rows = self._agg(by, aggs, groups)
         self._cols = _flatten(cols)
         self._rows = list(map(_flatten, rows))
         return self
 
-    def sort(self, by: StrS, reverse: bool = False) -> ty.Self:
+    def sort(self, by: StrS, reverse: bool = False) -> Koala:
         
         def _sort_fn(x) -> list:
             return [x[self._cols.index(c)] for c in by]
@@ -184,48 +196,7 @@ class Koala:
     def _has_col(self, col: str) -> bool:
         return col in self._cols
 
-    # def _join(self, right: ty.Self, on: StrS):
-    #     """
-    #     it's the user's responsibility to have the join
-    #     columns be the same on both tables
-    #     """
-    #     on = _listify(on)
-    #     left_has_keys = all(self._has_col(c) for c in on)
-    #     right_has_keys = all(right._has_col(c) for c in on)
-    #     if not (left_has_keys and right_has_keys):
-    #         raise KeyError(f"not a valid join key: {on}")
-    #
-    #     left_only = set(c for c in self._cols if c not in on)
-    #     right_only = set(c for c in right._cols if c not in on)
-    #     common = left_only.intersection(right_only)
-    #     if common:
-    #         self.rename({c: f"{c}_left" for c in common})
-    #         right.rename({c: f"{c}_right" for c in common})
-    #
-    #     lefts = list(map(self._row_as_dict, self._rows))
-    #     rights = list(map(right._row_as_dict, right._rows))
-    #     for l in lefts:
-    #         for r in rights:
-    #             if all(r[k] == l[k] for k in on):
-    #                 l.update(r)
-    #     return lefts
-    #
-    # def join_left(self, right: ty.Self, on: StrS) -> Koala:
-    #     cols = self._cols
-    #     cols.extend((c for c in right._cols if c not in cols))
-    #     rows = [[r.get(k) for k in cols] for r in self._join(right, on)]
-    #     return Koala(cols, rows)
-    #
-    # def join_inner(self, right: ty.Self, on: StrS) -> Koala:
-    #     return self.join_left(right, on).where(_has_no_null_values)
-    #
-    # def join_outer(self):
-    #     pass
-    #
-    # def join_cross(self):
-    #     pass
-
-    def dropna(self, subset: ty.Optional[list[str]] = None) -> ty.Self:
+    def dropna(self, subset: ty.Optional[list[str]] = None) -> Koala:
 
         if subset is None:
             def keep(r: list) -> bool:
@@ -248,35 +219,10 @@ class Koala:
                 self._rows[r][i] = value
         return self
 
-    def to_csv(self, f: Path) -> ty.Self:
+    def to_csv(self, f: Path) -> Koala:
         with f.open("w") as fp:
             writer = csv.DictWriter(fp, fieldnames=self._cols)
             writer.writeheader()
             writer.writerows(self._rows_as_dicts())
         return self
-
-# def check():
-#     import pandas as pd
-#
-#     df1 = pd.DataFrame({'lkey': ['foo', 'bar', 'baz', 'foo'], 'value': [1, 2, 3, 5]})
-#     df2 = pd.DataFrame({'rkey': ['foo', 'bar', 'baz', 'foo'], 'value': [5, 6, 7, 8]})
-#
-#     print(df1)
-#     print(df2)
-#     print(df1.merge(df2, left_on='lkey', right_on='rkey'))
-#
-#     cols = ["key", "value"]
-#     rows = [["foo", 1],["bar", 2],["baz", 3],["foo", 5]]
-#     k1 = Koala(cols, rows)
-#
-#     cols = ["key", "value"]
-#     rows = [["foo", 5],["bar", 6],["baz", 7],["foo", 8]]
-#     k2 = Koala(cols, rows)
-#
-#     k1.show()
-#     k2.show()
-#     k1.join_left(k2, on=["key"]).show()
-#
-# if __name__ == "__main__":
-#     check()
 

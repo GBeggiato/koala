@@ -8,7 +8,6 @@ provides methods for:
 - adding and removing columns
 - filtering
 - groupby and aggregate
-- join (not yet)
 - save and load CSV files
 
 ## Example 
@@ -43,8 +42,6 @@ from koala import Koala, AggregationFunc
     .column_drop("MAX_SEP_WIDTH_BY_SPECIES")
     .dropna()
     .fillna("a null species", subset=["species"])
-    .join_left(Koala.read_csv(f), on=["species"])
-    .join_inner(Koala.read_csv(f), on=["species"])
     .rename({
         "MIN_PET_WIDTH_BY_SPECIES": "a_better_name"
     })
