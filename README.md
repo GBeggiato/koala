@@ -5,10 +5,11 @@ aka a worse panda(s)
 minimal, in-memory data processing libraries for csv
 
 provides methods for:
-- adding and removing columns
+- adding, removing and renaming columns
 - filtering
 - groupby and aggregate
 - save and load CSV files
+- left, right, inner join
 
 ## Example 
 
@@ -52,3 +53,4 @@ from koala import Koala, AggregationFunc
 )
 
 ```
+

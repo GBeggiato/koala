@@ -8,6 +8,7 @@ import enum
 import itertools
 from pathlib import Path
 import statistics
+from sys import implementation
 import typing as ty
 
 
@@ -27,10 +28,10 @@ def _listify(s: StrS) -> list[str]:
     return s
 
 
-def _flatten(xs: list):  
+def _flatten(xs: list | tuple):  
     res = []  
     for x in xs:  
-        if isinstance(x, list):  
+        if isinstance(x, (list, tuple)):  
             res.extend(_flatten(x))
         else:  
             res.append(x)
@@ -41,10 +42,6 @@ def _parse(x: str) -> float | str:
     if x.replace(".", "").isdigit():
         return float(x)
     return x
-
-
-def _has_no_null_values(x: dict) -> bool:
-    return not (None in x.values())
 
 
 # TODO: map more functions + add custom
@@ -58,19 +55,16 @@ class AggregationFunc(enum.Enum):
     COUNT = enum.auto()
     FIRST = enum.auto()
 
-    @staticmethod
-    def _get_agg_func(s: AggregationFunc) -> ty.Callable:
+    def _callable(self) -> ty.Callable:
         msg = "bad aggregation function provided"
-        if not isinstance(s, AggregationFunc):
-            raise ValueError(msg)
-        if s == AggregationFunc.SUM    : return sum
-        if s == AggregationFunc.MIN    : return min
-        if s == AggregationFunc.MAX    : return max
-        if s == AggregationFunc.MEAN   : return statistics.mean
-        if s == AggregationFunc.STD    : return statistics.stdev
-        if s == AggregationFunc.MEDIAN : return statistics.median
-        if s == AggregationFunc.COUNT  : return len
-        if s == AggregationFunc.FIRST  : return lambda x: x[0]
+        if self == AggregationFunc.SUM    : return sum
+        if self == AggregationFunc.MIN    : return min
+        if self == AggregationFunc.MAX    : return max
+        if self == AggregationFunc.MEAN   : return statistics.mean
+        if self == AggregationFunc.STD    : return statistics.stdev
+        if self == AggregationFunc.MEDIAN : return statistics.median
+        if self == AggregationFunc.COUNT  : return len
+        if self == AggregationFunc.FIRST  : return lambda x: x[0]
         raise ValueError(msg)
 
 
@@ -82,6 +76,17 @@ class Koala:
     @property
     def columns(self) -> list[str]:
         return self._cols
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        """(n cols, n rows)"""
+        return len(self._cols), len(self._rows)
+
+    def _col_index(self, c: str) -> int:
+        try:
+           return self._cols.index(c)
+        except ValueError:
+            raise ValueError(f"column {c} not found")
 
     def clone(self) -> Koala:
         """deepcopy"""
@@ -106,24 +111,35 @@ class Koala:
                 list(list(map(_parse, row)) for row in lines)
             )
 
+    def col_tolist(self, col: str) -> list:
+        i = self._col_index(col)
+        return [r[i] for r in self._rows]
+
     def _row_as_dict(self, row: list) -> Row:
         return dict(zip(self._cols, row))
 
-    def _rows_as_dicts(self):
+    def as_dicts(self) -> ty.Generator[Row, ty.Any, None]:
         yield from map(self._row_as_dict, self._rows)
 
     def where(self, f: Func[bool]) -> Koala:
+        """filter rows according to a provided predicate"""
         self._rows = [r for r in self._rows if f(self._row_as_dict(r))]
         return self
 
     def column_drop(self, col: str) -> Koala:
-        position = self._cols.index(col)
+        """drop a provided column, fails if col is not there"""
+        position = self._col_index(col)
         del self._cols[position]
         for row in self._rows:
             del row[position]
         return self
 
     def column_add(self, name: str, f: Func[ty.Any]) -> Koala:
+        """
+        add a column based on a predicate.
+        if an existing name is provided, the
+        old column is dropped
+        """
         drop_old = name in self._cols
         self._cols.append(name)
         for row in self._rows:
@@ -156,7 +172,7 @@ class Koala:
         rows = collections.defaultdict(list)
         for i, agg in enumerate(aggs):
             result_name, _, agg_func = agg
-            f = AggregationFunc._get_agg_func(agg_func)
+            f = agg_func._callable()
             if i == 0:
                 cols.append(by)
             cols.append(result_name)
@@ -172,6 +188,9 @@ class Koala:
 
     def group(self, by: StrS, aggs: list[tuple[str, str, AggregationFunc]]) -> Koala:
         """
+        group by + aggregate
+
+        ## Example
         ```python3
         .group(
             by=["key"], # these go in a list
@@ -190,12 +209,14 @@ class Koala:
         return self
 
     def sort(self, by: StrS, reverse: bool = False) -> Koala:
+        """sort according to column value"""
         def _sort_fn(x) -> list:
-            return [x[self._cols.index(c)] for c in by]
+            return [x[self._col_index(c)] for c in by]
         self._rows.sort(key=_sort_fn, reverse=reverse)
         return self
 
     def rename(self, renamer: dict[str, str]):
+        """rename columns"""
         self._cols = [renamer.get(k, k) for k in self._cols]
         return self
 
@@ -203,19 +224,21 @@ class Koala:
         return col in self._cols
 
     def dropna(self, subset: ty.Optional[list[str]] = None) -> Koala:
+        """drop None values on an optional subset of cols (or all of them)"""
         if subset is None:
             def keep(r: list) -> bool:
-                return _has_no_null_values(self._row_as_dict(r))
+                return not (None in self._row_as_dict(r).values())
         else:
-            idxs = [self._cols.index(c) for c in subset]
+            idxs = [self._col_index(c) for c in subset]
             def keep(r: list) -> bool:
                 return all(r[i] is not None for i in idxs)
         self._rows = list(filter(keep, self._rows))
         return self
 
     def fillna(self, value: ty.Any, subset: ty.Optional[list[str]]=None):
+        """fill None values on an optional subset of cols (or all of them)"""
         idxs = range(len(self._cols)) if subset is None else [
-            self._cols.index(c) for c in subset
+            self._col_index(c) for c in subset
         ]
         indices = itertools.product(range(len(self._rows)), idxs)
         for r, i in indices:
@@ -227,7 +250,7 @@ class Koala:
         with f.open("w") as fp:
             writer = csv.DictWriter(fp, fieldnames=self._cols)
             writer.writeheader()
-            writer.writerows(self._rows_as_dicts())
+            writer.writerows(self.as_dicts())
         return self
 
     @classmethod
@@ -238,6 +261,9 @@ class Koala:
 
     def join_left(self, right: Koala, join_key: StrS):
         return self._join(self, right, join_key, _JoinKind.LEFT, dict())
+
+    def join_right(self, left: Koala, join_key: StrS):
+        return self._join(left, self, join_key, _JoinKind.LEFT, dict())
 
     def join_inner(self, right: Koala, join_key: StrS):
         return self._join(self, right, join_key, _JoinKind.INNER, None)
@@ -251,106 +277,25 @@ class Koala:
         default  : ty.Any
     ) -> Koala:
         join_key = _listify(join_key)
+
         def _join_key(d: dict) -> int:
             return hash(tuple(d[k] for k in join_key))
 
         left = left.clone().rename({c: f"{c}_left" for c in left._cols if c not in join_key})
         right = right.clone().rename({c: f"{c}_right" for c in right._cols if c not in join_key})
         cols = set(left._cols).union(right._cols)
-
-        right_dict = {_join_key(r): r for r in right._rows_as_dicts()}
+        right_dict = collections.defaultdict(list)
+        for r in right.as_dicts():
+            right_dict[_join_key(r)].append(r)
         result = []
-        for merged_row in left._rows_as_dicts():
-            right_row = right_dict.get(_join_key(merged_row), default)
+        for left_row in left.as_dicts():
+            right_row = right_dict.get(_join_key(left_row), default)
             if kind == _JoinKind.INNER and right_row is None:
                 continue
             assert right_row is not None
-            merged_row.update(right_row)
-            result.append({c: merged_row.get(c) for c in cols})
+            for rr in right_row:
+                row = copy.deepcopy(left_row)
+                row.update(rr)
+                result.append({c: row.get(c) for c in cols})
         return Koala.from_dict_list(result)
-
-
-
-
-# def left_join(left_table, right_table, join_key):
-#     """
-#     Perform a left join between two lists of dictionaries.
-#
-#     Args: - left_table: List of dictionaries from the left table
-#     - right_table: List of dictionaries from the right table
-#     - join_key: The key to use for matching records
-#
-#     Returns:
-#     - A list of merged dictionaries
-#     """
-#     # Create a dictionary from the right table for faster lookups
-#     right_dict = {record[join_key]: record for record in right_table}
-#
-#     # Perform the left join
-#     result = []
-#     for left_record in left_table:
-#         # Find matching record from right table
-#         right_record = right_dict.get(left_record[join_key], {})
-#
-#         # Merge the records
-#         merged_record = left_record.copy()
-#         merged_record.update(right_record)
-#
-#         result.append(merged_record)
-#
-#     return result
-#
-# # Example usage
-# left_table = [
-#     {'id': 1, 'name': 'Alice'},
-#     {'id': 2, 'name': 'Bob'},
-#     {'id': 3, 'name': 'Charlie'}
-# ]
-#
-# right_table = [
-#     {'id': 1, 'age': 30},
-#     {'id': 2, 'age': 25}
-# ]
-#
-# # Perform left join
-# result = left_join(left_table, right_table, 'id')
-# print(result)
-
-
-# def inner_join(left_table, right_table, join_key):
-#     """
-#     Perform an inner join between two lists of dictionaries.
-#
-#     Args:
-#     - left_table: List of dictionaries from the left table
-#     - right_table: List of dictionaries from the right table
-#     - join_key: The key to use for matching records
-#
-#     Returns:
-#     - A list of merged dictionaries with only matching records
-#     """
-#     # Create a dictionary from the right table for faster lookups
-#     right_dict = {record[join_key]: record for record in right_table}
-#
-#     # Perform the inner join
-#     result = []
-#     for left_record in left_table:
-#         # Find matching record from right table
-#         right_record = right_dict.get(left_record[join_key])
-#
-#         # Only add if a match is found
-#         if right_record is not None:
-#             # Merge the records
-#             merged_record = left_record.copy()
-#             merged_record.update(right_record)
-#
-#             result.append(merged_record)
-#
-#     return result
-#
-# # Example usage
-
-
-
-
 
