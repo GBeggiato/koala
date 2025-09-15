@@ -111,7 +111,7 @@ class Koala:
                 list(list(map(_parse, row)) for row in lines)
             )
 
-    def col_tolist(self, col: str) -> list:
+    def get(self, col: str) -> list:
         i = self._col_index(col)
         return [r[i] for r in self._rows]
 
@@ -210,8 +210,9 @@ class Koala:
 
     def sort(self, by: StrS, reverse: bool = False) -> Koala:
         """sort according to column value"""
+        ii = [self._col_index(c) for c in by]
         def _sort_fn(x) -> list:
-            return [x[self._col_index(c)] for c in by]
+            return [x[i] for i in ii]
         self._rows.sort(key=_sort_fn, reverse=reverse)
         return self
 
