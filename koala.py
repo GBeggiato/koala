@@ -300,3 +300,14 @@ class Koala:
                 result.append({c: row.get(c) for c in cols})
         return Koala.from_dict_list(result)
 
+    def join_cross(self, right: Koala) -> Koala:
+        left = self.clone().rename({c: f"{c}_left" for c in self._cols})
+        right_ = right.clone().rename({c: f"{c}_right" for c in right._cols})
+        right_pool = list(right_.as_dicts())
+        out = []
+        for left_row in left.as_dicts():
+            for right_row in right_pool:
+                row = left_row | right_row
+                out.append(row)
+        return Koala.from_dict_list(out)
+
