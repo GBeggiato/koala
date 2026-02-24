@@ -1,13 +1,8 @@
 """
-
-# Koala 
+# Koala
 aka a bad pandas (~ Barbascura X )
-
 ### basic dataframe manipulation for in-memory data
-
-- small, simple, 
-- modifiable, single-file
-
+- small, simple, modifiable, single-file
 """
 
 
@@ -22,7 +17,6 @@ import itertools
 from pathlib import Path
 import statistics
 import typing as ty
-
 
 type Row = dict[str, ty.Any]
 type Func[T] = ty.Callable[[Row], T]
@@ -39,14 +33,14 @@ def _listify(s: StrS) -> list[str]:
     return [s] if isinstance(s, str) else s
 
 
-def _flatten(xs: list | tuple):  
-    res = []  
-    for x in xs:  
-        if isinstance(x, (list, tuple)):  
+def _flatten(xs: list | tuple) -> list:
+    res = []
+    for x in xs:
+        if isinstance(x, (list, tuple)):
             res.extend(_flatten(x))
-        else:  
+        else:
             res.append(x)
-    return res  
+    return res
 
 
 def _parse(x: str) -> float | str:
@@ -123,7 +117,7 @@ class Koala:
         with f.open() as fp:
             lines = iter(csv.reader(fp))
             return cls(
-                list(next(lines)), 
+                list(next(lines)),
                 list(list(map(_parse, row)) for row in lines)
             )
 
@@ -167,7 +161,7 @@ class Koala:
     @staticmethod
     def _get_group_key(by: StrS, row: Row) -> str | tuple:
         if isinstance(by, str):
-            return row[by] 
+            return row[by]
         return tuple(row[b] for b in by)
 
     def _groupby(self, by: StrS, aggs: list[Aggregation]) -> dict:
@@ -209,13 +203,13 @@ class Koala:
         >>>     by=["key"], # these go in a list
         >>>     aggs=[
         >>>         # and you need a list of these
-        >>>         ( 
+        >>>         (
         >>>                 "tot_value_by_aggr", # the name of the new column
         >>>                 "column",            # the column we are aggregating
         >>>                 AggregationFunc.SUM  # the function we are using to aggregate
         >>>         ),
         >>>         # can be more explicit and use as follows (if you import 'Aggregation')
-        >>>         Aggregation( 
+        >>>         Aggregation(
         >>>             name = "tot_value_by_aggr",
         >>>             col  = "column",
         >>>             func = AggregationFunc.SUM
@@ -232,8 +226,10 @@ class Koala:
     def sort(self, by: StrS, reverse: bool = False) -> Koala:
         """sort according to column value"""
         ii = [self._col_index(c) for c in by]
+
         def _sort_fn(x) -> list:
             return [x[i] for i in ii]
+
         self._rows.sort(key=_sort_fn, reverse=reverse)
         return self
 
@@ -248,12 +244,16 @@ class Koala:
     def dropna(self, subset: ty.Optional[list[str]] = None) -> Koala:
         """drop None values on an optional subset of cols (or all of them)"""
         if subset is None:
+
             def keep(r: list) -> bool:
                 return not (None in self._row_as_dict(r).values())
+
         else:
             idxs = [self._col_index(c) for c in subset]
+
             def keep(r: list) -> bool:
                 return all(r[i] is not None for i in idxs)
+
         self._rows = list(filter(keep, self._rows))
         return self
 
@@ -366,4 +366,3 @@ class Koala:
             lambda b, a: (a[col_to_diff] - b[col_to_diff]) / b[col_to_diff],
             lag
         )
-
